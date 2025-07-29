@@ -1,0 +1,28 @@
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 50e086c..2c87f9e 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -59,6 +59,7 @@ if(BUILD_TESTING)
+         if(MSVC)
+             target_compile_options(${TEST_NAME} PRIVATE /W4 /WX)
+         else()
++            target_compile_definitions(${TEST_NAME} PRIVATE DOCTEST_CONFIG_NO_MULTITHREADING)
+             target_compile_options(${TEST_NAME} PRIVATE
+                 $<$<BOOL:${TOML11_COMPILER_SUPPORTS_WALL}>:                 -Wall                >
+                 $<$<BOOL:${TOML11_COMPILER_SUPPORTS_WEXTRA}>:               -Wextra              >
+@@ -99,6 +100,7 @@ if(TOML11_BUILD_TOML_TESTS)
+     if(MSVC)
+         target_compile_options(${TEST_NAME} PRIVATE /W4 /WX)
+     else()
++        target_compile_definitions(toml11_decoder PRIVATE DOCTEST_CONFIG_NO_MULTITHREADING)
+         target_compile_options(toml11_decoder PRIVATE
+             $<$<BOOL:${TOML11_COMPILER_SUPPORTS_WALL}>:                 -Wall                >
+             $<$<BOOL:${TOML11_COMPILER_SUPPORTS_WEXTRA}>:               -Wextra              >
+@@ -162,6 +164,7 @@ if(TOML11_BUILD_TOML_TESTS)
+     if(MSVC)
+         target_compile_options(${TEST_NAME} PRIVATE /W4 /WX)
+     else()
++        target_compile_definitions(toml11_encoder PRIVATE DOCTEST_CONFIG_NO_MULTITHREADING)
+         target_compile_options(toml11_encoder PRIVATE
+             $<$<BOOL:${TOML11_COMPILER_SUPPORTS_WALL}>:                 -Wall                >
+             $<$<BOOL:${TOML11_COMPILER_SUPPORTS_WEXTRA}>:               -Wextra              >
