@@ -1,5 +1,5 @@
 diff --git a/include/toml11/impl/syntax_impl.hpp b/include/toml11/impl/syntax_impl.hpp
-index 2dc768a..816a9b3 100644
+index 2dc768a..35ba30d 100644
 --- a/include/toml11/impl/syntax_impl.hpp
 +++ b/include/toml11/impl/syntax_impl.hpp
 @@ -5,6 +5,8 @@
@@ -11,34 +11,62 @@ index 2dc768a..816a9b3 100644
  namespace toml
  {
  namespace detail
-@@ -14,6 +16,26 @@ namespace syntax
+@@ -14,6 +16,17 @@ namespace syntax
  
  using char_type = location::char_type;
  
++#ifdef __MVS__
 +#define thread_local
 +
 +#define TLS_STATIC(Type, Name, ...) \
 +    static __tlssim<Type> Name##_tls{Type(__VA_ARGS__)}; \
 +    auto& Name = *Name##_tls.access()
-+
-+
-+template<typename F>
-+TOML11_INLINE typename std::add_lvalue_reference<
-+    typename std::remove_reference<
-+        decltype(make_cache(std::declval<F>()))
-+    >::type
-+>::type
-+make_cache_tls_zos(F&& f)
-+{
-+    typedef decltype(make_cache(std::forward<F>(f))) CacheType;
-+    static __tlssim<CacheType> obj(make_cache(std::forward<F>(f)));
-+    return *obj.access();
-+}
++#else
++  #define TLS_STATIC(type, name, ...) \
++    static thread_local type name(__VA_ARGS__)
++#endif
 +
  template<typename F>
  struct syntax_cache
  {
-@@ -51,37 +73,47 @@ syntax_cache<cxx::remove_cvref_t<F>> make_cache(F&& f)
+@@ -38,12 +51,36 @@ struct syntax_cache
+     cxx::optional<std::pair<spec, value_type>> cache_;
+ };
+ 
++#if !defined(__MVS__)
+ template<typename F>
+ syntax_cache<cxx::remove_cvref_t<F>> make_cache(F&& f)
+ {
+     return syntax_cache<cxx::remove_cvref_t<F>>(std::forward<F>(f));
+ }
+ 
++#else
++
++template<typename F>
++syntax_cache<cxx::remove_cvref_t<F>> make_cache_orig(F&& f)
++{
++    return syntax_cache<cxx::remove_cvref_t<F>>(std::forward<F>(f));
++}
++
++template<typename F>
++typename std::add_lvalue_reference<
++    typename std::remove_reference<
++        decltype(make_cache_orig(std::declval<F>()))
++    >::type
++>::type
++make_cache(F&& f)
++{
++    typedef decltype(make_cache_orig(std::forward<F>(f))) CacheType;
++    static __tlssim<CacheType> obj(make_cache_orig(std::forward<F>(f)));
++    return *obj.access();
++}
++
++#endif
++
+ // ===========================================================================
+ // UTF-8
+ 
+@@ -51,37 +88,47 @@ syntax_cache<cxx::remove_cvref_t<F>> make_cache(F&& f)
  
  TOML11_INLINE character_in_range const& utf8_1byte(const spec&)
  {
@@ -101,7 +129,7 @@ index 2dc768a..816a9b3 100644
  
      return cache;
  }
-@@ -91,13 +123,13 @@ TOML11_INLINE sequence const& utf8_4bytes(const spec&)
+@@ -91,7 +138,7 @@ TOML11_INLINE sequence const& utf8_4bytes(const spec&)
  
  TOML11_INLINE character_either const& wschar(const spec&)
  {
@@ -110,14 +138,7 @@ index 2dc768a..816a9b3 100644
      return cache;
  }
  
- TOML11_INLINE repeat_at_least const& ws(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s){
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s){
-         return repeat_at_least(0, wschar(s));
-     });
-     return cache.at(sp);
-@@ -108,7 +140,7 @@ TOML11_INLINE repeat_at_least const& ws(const spec& sp)
+@@ -108,7 +155,7 @@ TOML11_INLINE repeat_at_least const& ws(const spec& sp)
  
  TOML11_INLINE either const& newline(const spec&)
  {
@@ -126,25 +147,7 @@ index 2dc768a..816a9b3 100644
      return cache;
  }
  
-@@ -117,7 +149,7 @@ TOML11_INLINE either const& newline(const spec&)
- 
- TOML11_INLINE either const& allowed_comment_char(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s){
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s){
-             if(s.v1_1_0_allow_control_characters_in_comments)
-             {
-                 return either(
-@@ -141,7 +173,7 @@ TOML11_INLINE either const& allowed_comment_char(const spec& sp)
- // XXX Note that it does not take newline
- TOML11_INLINE sequence const& comment(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s){
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s){
-         return sequence(character(char_type('#')),
-                     repeat_at_least(0, allowed_comment_char(s)));
-     });
-@@ -153,7 +185,7 @@ TOML11_INLINE sequence const& comment(const spec& sp)
+@@ -153,7 +200,7 @@ TOML11_INLINE sequence const& comment(const spec& sp)
  
  TOML11_INLINE either const& boolean(const spec&)
  {
@@ -153,344 +156,7 @@ index 2dc768a..816a9b3 100644
      return cache;
  }
  
-@@ -165,7 +197,7 @@ TOML11_INLINE either const& boolean(const spec&)
- // suffix          = _ non-digit-graph (graph | _graph)
- TOML11_INLINE sequence const& num_suffix(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         const auto non_digit_graph = [&s]() {
-             return either(
-                 alpha(s),
-@@ -196,7 +228,7 @@ TOML11_INLINE sequence const& num_suffix(const spec& sp)
- 
- TOML11_INLINE sequence const& dec_int(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         const auto digit19 = []() {
-             return character_in_range(char_type('1'), char_type('9'));
-         };
-@@ -221,7 +253,7 @@ TOML11_INLINE sequence const& dec_int(const spec& sp)
- 
- TOML11_INLINE sequence const& hex_int(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(
-                 literal("0x"),
-                 hexdig(s),
-@@ -238,7 +270,7 @@ TOML11_INLINE sequence const& hex_int(const spec& sp)
- 
- TOML11_INLINE sequence const& oct_int(const spec& s)
- {
--    static thread_local auto cache = make_cache([](const spec&) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec&) {
-         const auto digit07 = []() {
-             return character_in_range(char_type('0'), char_type('7'));
-         };
-@@ -258,7 +290,7 @@ TOML11_INLINE sequence const& oct_int(const spec& s)
- 
- TOML11_INLINE sequence const& bin_int(const spec& s)
- {
--    static thread_local auto cache = make_cache([](const spec&) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec&) {
-         const auto digit01 = []() {
-             return character_either("01");
-         };
-@@ -278,7 +310,7 @@ TOML11_INLINE sequence const& bin_int(const spec& s)
- 
- TOML11_INLINE either const& integer(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return either(
-                 hex_int(s),
-                 oct_int(s),
-@@ -295,7 +327,7 @@ TOML11_INLINE either const& integer(const spec& sp)
- 
- TOML11_INLINE sequence const& zero_prefixable_int(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(
-                 digit(s),
-                 repeat_at_least(0,
-@@ -311,7 +343,7 @@ TOML11_INLINE sequence const& zero_prefixable_int(const spec& sp)
- 
- TOML11_INLINE sequence const& fractional_part(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(
-                 character('.'),
-                 zero_prefixable_int(s)
-@@ -322,7 +354,7 @@ TOML11_INLINE sequence const& fractional_part(const spec& sp)
- 
- TOML11_INLINE sequence const& exponent_part(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(
-                 character_either("eE"),
-                 maybe(character_either("+-")),
-@@ -334,7 +366,7 @@ TOML11_INLINE sequence const& exponent_part(const spec& sp)
- 
- TOML11_INLINE sequence const& hex_floating(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         // C99 hexfloat (%a)
-         // [+-]? 0x ( [0-9a-fA-F]*\.[0-9a-fA-F]+ | [0-9a-fA-F]+\.? ) [pP] [+-]? [0-9]+
- 
-@@ -368,7 +400,7 @@ TOML11_INLINE sequence const& hex_floating(const spec& sp)
- 
- TOML11_INLINE either const& floating(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return either(
-                 sequence(
-                     dec_int(s),
-@@ -391,7 +423,7 @@ TOML11_INLINE either const& floating(const spec& sp)
- 
- TOML11_INLINE sequence const& local_date(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(
-                 repeat_exact(4, digit(s)),
-                 character('-'),
-@@ -404,7 +436,7 @@ TOML11_INLINE sequence const& local_date(const spec& sp)
- }
- TOML11_INLINE sequence const& local_time(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         if(s.v1_1_0_make_seconds_optional)
-         {
-             return sequence(
-@@ -433,7 +465,7 @@ TOML11_INLINE sequence const& local_time(const spec& sp)
- }
- TOML11_INLINE either const& time_offset(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return either(
-                 character_either("zZ"),
-                 sequence(character_either("+-"),
-@@ -447,28 +479,28 @@ TOML11_INLINE either const& time_offset(const spec& sp)
- }
- TOML11_INLINE sequence const& full_time(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-             return sequence(local_time(s), time_offset(s));
-         });
-     return cache.at(sp);
- }
- TOML11_INLINE character_either const& time_delim(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec&) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec&) {
-             return character_either("Tt ");
-         });
-     return cache.at(sp);
- }
- TOML11_INLINE sequence const& local_datetime(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-             return sequence(local_date(s), time_delim(s), local_time(s));
-         });
-     return cache.at(sp);
- }
- TOML11_INLINE sequence const& offset_datetime(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-             return sequence(local_date(s), time_delim(s), full_time(s));
-         });
-     return cache.at(sp);
-@@ -479,21 +511,21 @@ TOML11_INLINE sequence const& offset_datetime(const spec& sp)
- 
- TOML11_INLINE sequence const& escaped_x2(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-             return sequence(character('x'), repeat_exact(2, hexdig(s)));
-         });
-     return cache.at(sp);
- }
- TOML11_INLINE sequence const& escaped_u4(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-             return sequence(character('u'), repeat_exact(4, hexdig(s)));
-         });
-     return cache.at(sp);
- }
- TOML11_INLINE sequence const& escaped_U8(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-             return sequence(character('U'), repeat_exact(8, hexdig(s)));
-         });
-     return cache.at(sp);
-@@ -501,7 +533,7 @@ TOML11_INLINE sequence const& escaped_U8(const spec& sp)
- 
- TOML11_INLINE sequence const& escaped(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         const auto escape_char = [&s] {
-             if(s.v1_1_0_add_escape_sequence_e)
-             {
-@@ -540,7 +572,7 @@ TOML11_INLINE sequence const& escaped(const spec& sp)
- 
- TOML11_INLINE either const& basic_char(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         const auto basic_unescaped = [&s]() {
-             return either(
-                     wschar(s),
-@@ -557,7 +589,7 @@ TOML11_INLINE either const& basic_char(const spec& sp)
- 
- TOML11_INLINE sequence const& basic_string(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(
-                 character('"'),
-                 repeat_at_least(0, basic_char(s)),
-@@ -572,7 +604,7 @@ TOML11_INLINE sequence const& basic_string(const spec& sp)
- 
- TOML11_INLINE sequence const& escaped_newline(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(
-                 character('\\'), ws(s), newline(s),
-                 repeat_at_least(0, either(wschar(s), newline(s)))
-@@ -583,7 +615,7 @@ TOML11_INLINE sequence const& escaped_newline(const spec& sp)
- 
- TOML11_INLINE sequence const& ml_basic_string(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         const auto mlb_content = [&s]() {
-             return either(basic_char(s), newline(s), escaped_newline(s));
-         };
-@@ -615,7 +647,7 @@ TOML11_INLINE sequence const& ml_basic_string(const spec& sp)
- 
- TOML11_INLINE either const& literal_char(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return either(
-                 character         (0x09),
-                 character_in_range(0x20, 0x26),
-@@ -628,7 +660,7 @@ TOML11_INLINE either const& literal_char(const spec& sp)
- 
- TOML11_INLINE sequence const& literal_string(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(
-                 character('\''),
-                 repeat_at_least(0, literal_char(s)),
-@@ -640,7 +672,7 @@ TOML11_INLINE sequence const& literal_string(const spec& sp)
- 
- TOML11_INLINE sequence const& ml_literal_string(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         const auto mll_quotes = []() {
-             return either(literal("''"), character('\''));
-         };
-@@ -668,7 +700,7 @@ TOML11_INLINE sequence const& ml_literal_string(const spec& sp)
- 
- TOML11_INLINE either const& string(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return either(
-                 ml_basic_string(s),
-                 ml_literal_string(s),
-@@ -795,7 +827,7 @@ TOML11_INLINE region non_ascii_key_char::scan(location& loc) const
- 
- TOML11_INLINE repeat_at_least const& unquoted_key(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         const auto keychar = [&s] {
-             if(s.v1_1_0_allow_non_english_in_bare_keys)
-             {
-@@ -814,7 +846,7 @@ TOML11_INLINE repeat_at_least const& unquoted_key(const spec& sp)
- 
- TOML11_INLINE either const& quoted_key(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-     return either(basic_string(s), literal_string(s));
-     });
-     return cache.at(sp);
-@@ -822,7 +854,7 @@ TOML11_INLINE either const& quoted_key(const spec& sp)
- 
- TOML11_INLINE either const& simple_key(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return either(unquoted_key(s), quoted_key(s));
-     });
-     return cache.at(sp);
-@@ -830,7 +862,7 @@ TOML11_INLINE either const& simple_key(const spec& sp)
- 
- TOML11_INLINE sequence const& dot_sep(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(ws(s), character('.'), ws(s));
-     });
-     return cache.at(sp);
-@@ -838,7 +870,7 @@ TOML11_INLINE sequence const& dot_sep(const spec& sp)
- 
- TOML11_INLINE sequence const& dotted_key(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(
-             simple_key(s),
-             repeat_at_least(1, sequence(dot_sep(s), simple_key(s)))
-@@ -849,7 +881,7 @@ TOML11_INLINE sequence const& dotted_key(const spec& sp)
- 
- TOML11_INLINE sequence const& keyval_sep(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(ws(s), character('='), ws(s));
-     });
-     return cache.at(sp);
-@@ -860,7 +892,7 @@ TOML11_INLINE sequence const& keyval_sep(const spec& sp)
- 
- TOML11_INLINE sequence const& std_table(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(character('['), ws(s), key(s), ws(s), character(']'));
-     });
-     return cache.at(sp);
-@@ -868,7 +900,7 @@ TOML11_INLINE sequence const& std_table(const spec& sp)
- 
- TOML11_INLINE sequence const& array_table(const spec& sp)
- {
--    static thread_local auto cache = make_cache([](const spec& s) {
-+    static thread_local auto cache = make_cache_tls_zos([](const spec& s) {
-         return sequence(literal("[["), ws(s), key(s), ws(s), literal("]]"));
-     });
-     return cache.at(sp);
-@@ -879,7 +911,7 @@ TOML11_INLINE sequence const& array_table(const spec& sp)
+@@ -879,7 +926,7 @@ TOML11_INLINE sequence const& array_table(const spec& sp)
  
  TOML11_INLINE literal const& null_value(const spec&)
  {

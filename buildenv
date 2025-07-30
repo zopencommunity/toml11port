@@ -55,19 +55,21 @@ zopen_check_results()
   dir="$1"
   pfx="$2"
   chk="$1/$2_check.log"
-
-  # Echo the following information to gauge build health
-  echo "actualFailures:0"
-  echo "totalTests:1"
+  
+  actualFailures=$(grep -E '^[[:space:]]*[0-9]+/[0-9]+[[:space:]]+Test[[:space:]]+#' $chk | awk '$(NF-2) ~ /\*\*\*Failed/ { count++ } END { print count+0 }')
+  actualPasses=$(grep -E '^[[:space:]]*[0-9]+/[0-9]+[[:space:]]+Test[[:space:]]+#' $chk | awk '$(NF-2) == "Passed" { count++ } END { print count+0 }')
+  totalTests=$(grep -E '^[[:space:]]*[0-9]+/[0-9]+[[:space:]]+Test[[:space:]]+#' $chk | wc -l)
+  echo "actualFailures:$actualFailures"
+  echo "totalTests:$totalTests"
   echo "expectedFailures:0"
-  echo "expectedTotalTests:1"
+  echo "expectedTotalTests:42"
 }
 
 zopen_get_version()
 {
   # Modify to echo the version of your tool/library
   # Rather than hardcoding the version, obtain the version by running the tool/library
-  echo "1.0.0"
+  echo $TOML11_VERSION
 }
 
 
@@ -75,10 +77,18 @@ zopen_get_version()
 ### Optional user-supplied functions for zopen-build
 ###
 
-#zopen_append_to_env() {
+zopen_append_to_env() {
   ## This function runs as part of generation of the .env file. The output of the
   ## function is appended to .env.
-#}
+cat <<ZZ
+if [ ! -z "\$ZOPEN_IN_ZOPEN_BUILD" ]; then
+  export ZOPEN_EXTRA_CFLAGS="\${ZOPEN_EXTRA_CFLAGS} -I\$PWD/include"
+  export ZOPEN_EXTRA_CXXFLAGS="\${ZOPEN_EXTRA_CXXFLAGS} -I\$PWD/include"
+  export ZOPEN_EXTRA_LDFLAGS="\${ZOPEN_EXTRA_LDFLAGS} -L\$PWD/lib"
+  export CMAKE_PREFIX_PATH="\$PWD/lib/cmake/toml11/:\${CMAKE_PREFIX_PATH}"
+fi
+ZZ
+}
 
 #zopen_append_to_setup(){
   ## This function runs as part of generation of the setup.sh file. The output of
