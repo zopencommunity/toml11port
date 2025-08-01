@@ -1,0 +1,167 @@
+diff --git a/include/toml11/impl/syntax_impl.hpp b/include/toml11/impl/syntax_impl.hpp
+index 2dc768a..35ba30d 100644
+--- a/include/toml11/impl/syntax_impl.hpp
++++ b/include/toml11/impl/syntax_impl.hpp
+@@ -5,6 +5,8 @@
+ #include "../scanner.hpp"
+ #include "../spec.hpp"
+ 
++#include <zos-tls.h>
++
+ namespace toml
+ {
+ namespace detail
+@@ -14,6 +16,17 @@ namespace syntax
+ 
+ using char_type = location::char_type;
+ 
++#ifdef __MVS__
++#define thread_local
++
++#define TLS_STATIC(Type, Name, ...) \
++    static __tlssim<Type> Name##_tls{Type(__VA_ARGS__)}; \
++    auto& Name = *Name##_tls.access()
++#else
++  #define TLS_STATIC(type, name, ...) \
++    static thread_local type name(__VA_ARGS__)
++#endif
++
+ template<typename F>
+ struct syntax_cache
+ {
+@@ -38,12 +51,36 @@ struct syntax_cache
+     cxx::optional<std::pair<spec, value_type>> cache_;
+ };
+ 
++#if !defined(__MVS__)
+ template<typename F>
+ syntax_cache<cxx::remove_cvref_t<F>> make_cache(F&& f)
+ {
+     return syntax_cache<cxx::remove_cvref_t<F>>(std::forward<F>(f));
+ }
+ 
++#else
++
++template<typename F>
++syntax_cache<cxx::remove_cvref_t<F>> make_cache_orig(F&& f)
++{
++    return syntax_cache<cxx::remove_cvref_t<F>>(std::forward<F>(f));
++}
++
++template<typename F>
++typename std::add_lvalue_reference<
++    typename std::remove_reference<
++        decltype(make_cache_orig(std::declval<F>()))
++    >::type
++>::type
++make_cache(F&& f)
++{
++    typedef decltype(make_cache_orig(std::forward<F>(f))) CacheType;
++    static __tlssim<CacheType> obj(make_cache_orig(std::forward<F>(f)));
++    return *obj.access();
++}
++
++#endif
++
+ // ===========================================================================
+ // UTF-8
+ 
+@@ -51,37 +88,47 @@ syntax_cache<cxx::remove_cvref_t<F>> make_cache(F&& f)
+ 
+ TOML11_INLINE character_in_range const& utf8_1byte(const spec&)
+ {
+-    static thread_local character_in_range cache(0x00, 0x7F);
++    TLS_STATIC(character_in_range, cache, 0x00, 0x7F);
+     return cache;
+ }
+ 
+ TOML11_INLINE sequence const& utf8_2bytes(const spec&)
+ {
+-    static thread_local sequence cache(
++    TLS_STATIC(sequence, cache,
++        sequence(
+             character_in_range(0xC2, 0xDF),
+-            character_in_range(0x80, 0xBF));
++            character_in_range(0x80, 0xBF)));
+     return cache;
+ }
+ 
+ TOML11_INLINE sequence const& utf8_3bytes(const spec&)
+ {
+-    static thread_local sequence cache(/*1~2 bytes = */either(
+-        sequence(character         (0xE0),       character_in_range(0xA0, 0xBF)),
+-        sequence(character_in_range(0xE1, 0xEC), character_in_range(0x80, 0xBF)),
+-        sequence(character         (0xED),       character_in_range(0x80, 0x9F)),
+-        sequence(character_in_range(0xEE, 0xEF), character_in_range(0x80, 0xBF))
+-    ), /*3rd byte = */ character_in_range(0x80, 0xBF));
+-
++    TLS_STATIC(sequence, cache,
++        sequence(
++            /* 1~2 bytes = */ either(
++                sequence(character         (0xE0),       character_in_range(0xA0, 0xBF)),
++                sequence(character_in_range(0xE1, 0xEC), character_in_range(0x80, 0xBF)),
++                sequence(character         (0xED),       character_in_range(0x80, 0x9F)),
++                sequence(character_in_range(0xEE, 0xEF), character_in_range(0x80, 0xBF))
++            ),
++            /* 3rd byte = */ character_in_range(0x80, 0xBF)
++        )
++    );
+     return cache;
+ }
+ 
+ TOML11_INLINE sequence const& utf8_4bytes(const spec&)
+ {
+-    static thread_local sequence cache(/*1~2 bytes = */either(
+-        sequence(character         (0xF0),       character_in_range(0x90, 0xBF)),
+-        sequence(character_in_range(0xF1, 0xF3), character_in_range(0x80, 0xBF)),
+-        sequence(character         (0xF4),       character_in_range(0x80, 0x8F))
+-    ), character_in_range(0x80, 0xBF), character_in_range(0x80, 0xBF));
++    TLS_STATIC(sequence, cache,
++        /* 1~2 bytes = */ either(
++            sequence(character         (0xF0),       character_in_range(0x90, 0xBF)),
++            sequence(character_in_range(0xF1, 0xF3), character_in_range(0x80, 0xBF)),
++            sequence(character         (0xF4),       character_in_range(0x80, 0x8F))
++        ),
++        /* 3rd and 4th bytes = */
++        character_in_range(0x80, 0xBF),
++        character_in_range(0x80, 0xBF)
++    );
+ 
+     return cache;
+ }
+@@ -91,7 +138,7 @@ TOML11_INLINE sequence const& utf8_4bytes(const spec&)
+ 
+ TOML11_INLINE character_either const& wschar(const spec&)
+ {
+-    static thread_local character_either cache(" \t");
++    TLS_STATIC(character_either, cache, " \t");
+     return cache;
+ }
+ 
+@@ -108,7 +155,7 @@ TOML11_INLINE repeat_at_least const& ws(const spec& sp)
+ 
+ TOML11_INLINE either const& newline(const spec&)
+ {
+-    static thread_local either cache(character(char_type('\n')), literal("\r\n"));
++    TLS_STATIC(either, cache, character(char_type('\n')), literal("\r\n"));
+     return cache;
+ }
+ 
+@@ -153,7 +200,7 @@ TOML11_INLINE sequence const& comment(const spec& sp)
+ 
+ TOML11_INLINE either const& boolean(const spec&)
+ {
+-    static thread_local either cache(literal("true"), literal("false"));
++    TLS_STATIC(either, cache, literal("true"), literal("false"));
+     return cache;
+ }
+ 
+@@ -879,7 +926,7 @@ TOML11_INLINE sequence const& array_table(const spec& sp)
+ 
+ TOML11_INLINE literal const& null_value(const spec&)
+ {
+-    static thread_local literal cache("null");
++    TLS_STATIC(literal, cache, "null");
+     return cache;
+ }
+ 
